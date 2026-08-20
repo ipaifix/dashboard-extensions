@@ -1,0 +1,28 @@
+# Build Rancher UI extension Helm charts locally (no GitHub Actions).
+# Usage:
+#   docker build -f Dockerfile.publish -t kubevirt-ext-publish .
+#   docker run --rm -v "$PWD":/app -w /app kubevirt-ext-publish \
+#     yarn publish-pkgs -s ipaifix/dashboard-extensions -b gh-pages \
+#     -t kubevirt-dashboard-extension-1.4.0-rc.1 kubevirt-dashboard-extension
+
+FROM node:20-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq wget \
+    && ARCH="$(dpkg --print-architecture)" \
+    && case "$ARCH" in amd64) YQ_ARCH=amd64; HELM_ARCH=amd64 ;; arm64) YQ_ARCH=arm64; HELM_ARCH=arm64 ;; *) echo "unsupported arch $ARCH"; exit 1 ;; esac \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_${YQ_ARCH}" \
+         -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq \
+    && curl -fsSL "https://get.helm.sh/helm-v3.16.2-linux-${HELM_ARCH}.tar.gz" | tar -xz \
+    && mv "linux-${HELM_ARCH}/helm" /usr/local/bin/helm \
+    && rm -rf "linux-${HELM_ARCH}" /var/lib/apt/lists/* \
+    && printf '#!/bin/sh\nmd5sum "$@" | awk "{print \$1}"\n' > /usr/local/bin/md5-q \
+    && printf '#!/bin/sh\nif [ "$1" = "-q" ]; then shift; md5-q "$@"; else md5sum "$@"; fi\n' > /usr/local/bin/md5 \
+    && chmod +x /usr/local/bin/md5 /usr/local/bin/md5-q
+
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+
+WORKDIR /app
+
+# Default: show help; override CMD at docker run
+CMD ["yarn", "publish-pkgs", "-h"]

@@ -68,3 +68,10 @@ jspm_packages/
 # System Files
 .DS_Store
 Thumbs.db
+# Local extension publish outputs (published on gh-pages only)
+/dist-pkg/
+/assets/
+/charts/
+/extensions/
+/index.yaml
+/tmp/
