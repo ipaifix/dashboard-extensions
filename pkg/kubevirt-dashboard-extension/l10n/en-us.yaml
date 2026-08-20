@@ -21,16 +21,55 @@ kubevirt:
         success: 'Template { templateName } created successfully.'
         failed: 'Failed generated template!'
     cloneVM:
-      title: Clone VM
+      title: 'Clone VM — {name}'
       name: New VM Name
+      namePlaceholder: cloned-vm-name
+      startAfterCreate: Start the cloned VM after creation
+      checkingApi: Checking clone API…
+      apiUnavailable: 'The VirtualMachineClone API is not available on this cluster. KubeVirt v1.7+ is required.'
+      cloning: Cloning…
+      clone: Clone
+      cancel: Cancel
+      progress:
+        creating: Creating clone…
+        cloningWithPhase: 'Cloning… (phase: {phase})'
+        waiting: pending
+        starting: Starting cloned VM…
+      message:
+        tip: Please enter a VM name!
+        successTitle: Clone succeeded
+        success: 'VM "{name}" was cloned successfully.'
+        failedTitle: Clone error
+        failed: 'Clone failed (phase: {phase}).'
+        timeout: 'Timeout: cloning took too long.'
       type: clone volume data
       action:
         create: Create
         clone: Clone
-      message:
-        tip: Please enter a VM name!
-        success: 'VM { name } cloned successfully.'
-        failed: 'Failed clone VM!'
+    snapshot:
+      title: 'Take Snapshot — {name}'
+      nameLabel: Snapshot name
+      namePlaceholder: Snapshot name
+      takeSnapshot: Take Snapshot
+      saving: Saving…
+      createError: Failed to create snapshot.
+      createdTitle: Snapshot created
+      created: 'Snapshot "{name}" has been initiated.'
+    restoreSnapshot:
+      title: 'Restore Snapshot — {name}'
+      confirmMessage: 'Restore VM from snapshot "{snapshot}"?'
+      mustStop: The virtual machine must be stopped before restoring a snapshot.
+      stopThenRestoreHint: Choose “Stop & Restore” to stop the VM and start the restore.
+      stopAndRestore: Stop & Restore
+      restore: Restore
+      stopping: Stopping & restoring…
+      restoring: Restoring…
+      createError: Failed to start restore.
+      missingContext: 'Unable to restore: missing VM, snapshot, or cluster context.'
+      stopTimeout: Timed out waiting for the VM to stop before restore.
+      initiatedTitle: Restore initiated
+      initiated: 'Restore from "{name}" started.'
+      volumesWarning: 'Warning: some volumes were excluded from this snapshot ({volumes}). Disk data for those volumes will not be restored.'
     exportImage:
       title: Export to Image
       name: Name
@@ -66,16 +105,28 @@ kubevirt:
       info: Info
       warning: Warning
       error: Error
+    forceStopSuccess: 'Force stop requested for VM {name}.'
+    forceStopFallback: 'Force stop failed for VM {name}. Applying patch fallback…'
+    forceStopFallbackSuccess: 'Force stop fallback applied for VM {name} ({mode}).'
+    forceStopStartingFallback: 'VM {name} is stuck starting. Forcing halted…'
+    forceStopStartingSuccess: 'VM {name} forced to halted ({mode}).'
+    migrationAbortedTitle: Migration aborted
+    migrationAborted: 'Migration of {name} has been aborted.'
   action:
     createVM: Create a Virtual Machine
     start: Start
     restart: Restart
     softreboot: Soft Reboot
     stop: Stop
+    forceStop: Force Stop
     pause: Pause
     deepClone: Clone
     shallowClone: Clone Template
+    cloneVM: Clone VM
+    takeSnapshot: Take Snapshot
     unpause: Unpause
+    migrate: Migrate
+    abortMigration: Abort Migration
     ejectCDROM: Eject CDROM
     launchFormTemplate: Launch instance from template
     modifyTemplate: Modify template (Create new version)
@@ -85,8 +136,6 @@ kubevirt:
     restore: Restore
     restoreNewVM: Restore New
     restoreExistingVM: Replace Existing
-    migrate: Migrate
-    abortMigration: Abort Migration
     createTemplate: Generate Template
     enableMaintenance: Enable Maintenance Mode
     disableMaintenance: Disable Maintenance Mode
@@ -289,6 +338,7 @@ kubevirt:
         label: version
     console:
       novnc: Open in Web VNC
+      sendCtrlAltDel: Send Ctrl+Alt+Del
       serial: Open in Serial Console
     promptRemove:
       title: 'Select the volume you want to delete:'
@@ -408,6 +458,91 @@ kubevirt:
         keypairs: SSH Keys
         cloudConfig: Cloud Config
         metrics: VM Metrics
+        logs: Logs
+        snapshots: Snapshots
+      logs:
+        title: Serial Console Logs
+        subtitle: Guest console output from virt-launcher.
+        refresh: Refresh
+        loading: Loading logs...
+        empty: No logs available for this VM yet.
+        notRunning: VM is stopped — serial logs unavailable
+        serialUnavailable: Serial console logs unavailable. Showing infrastructure logs.
+        autoRefresh: Auto-refresh every {sec}s
+        pod: 'Pod: {pod}'
+        source:
+          serial: 'Source: guest-console-log'
+          fallback: 'Source: default container logs'
+        errors:
+          invalidVm: VM name or namespace is missing.
+          noPod: No virt-launcher pod found for this VM.
+          forbidden: You do not have permission to read VM logs.
+          notFound: virt-launcher pod was not found for this VM.
+          fetchFailed: 'Failed to load VM logs: {message}'
+      migration:
+        inProgress: 'Migration in progress — from {source} to {target} (phase: {phase})'
+        failed: 'Last migration failed ({source} → {target})'
+      restore:
+        inProgress: 'Restore in progress — waiting for VirtualMachineRestore / volumes to complete…'
+      snapshots:
+        takeSnapshot: Take Snapshot
+        loading: Loading snapshots…
+        empty: No snapshots found for this VM.
+        restore: Restore
+        restoring: Restoring...
+        restoreTitle: Restore from this snapshot
+        restoreNotReady: Snapshot not ready
+        restoreInProgress: Restore in progress
+        deleteTitle: Delete this snapshot
+        activeRestores: 'Restore in progress: {count} operation(s).'
+        columns:
+          name: Name
+          state: State
+          created: Created
+          lastRestore: Last Restore
+          actions: Actions
+        states:
+          ready: Ready
+          error: Error
+          inProgress: In Progress
+          restoring: Restoring…
+          complete: Complete
+          failed: Failed
+        labels:
+          restoreFailed: Restore failed
+          restoreCompleted: Restore completed
+          restoringWithPhase: 'Restoring ({phase})...'
+        relative:
+          justNow: just now
+          minutesAgo: '{mins} min ago'
+          hoursAgo: '{hrs} h ago'
+          daysAgo: '{days} d ago'
+        errors:
+          apiUnavailable: Snapshot API (snapshot.kubevirt.io/v1beta1) is not available on this cluster.
+          fetchFailed: Failed to fetch snapshots.
+          unexpected: An unexpected error occurred.
+          openDialog: Failed to open the snapshot dialog.
+          openRestoreDialog: Failed to open the restore dialog.
+          trackFailed: Failed to track the restore in progress.
+          timeoutMessage: Restore tracking timed out. Check the VirtualMachineRestore resource.
+          timeoutGrowl: Restore is taking longer than expected. Check the VirtualMachineRestore resource.
+          missingCluster: Unable to determine the current cluster (missing clusterId).
+          startFailed: 'Failed to start restore for "{name}".'
+        growl:
+          dialogErrorTitle: Snapshot dialog error
+          restoreFailedTitle: Restore failed
+          restoreFailed: 'Restore of snapshot "{name}" failed.'
+          restoreCompletedTitle: Restore completed
+          restoreCompleted: 'Restore of snapshot "{name}" completed.'
+          trackErrorTitle: Restore tracking error
+          timeoutTitle: Restore timeout
+          restoreErrorTitle: Restore error
+          restoreInitiatedTitle: Restore initiated
+          restoreInitiated: 'Restore from "{name}" started. Tracking…'
+          restoreRequestSent: Restore request sent.
+          snapshotDeletedTitle: Snapshot deleted
+          snapshotDeleted: 'Snapshot "{name}" has been deleted.'
+          deleteErrorTitle: Delete error
       details:
         title:
           vmDetails: Virtual Machine Details
@@ -451,6 +586,11 @@ kubevirt:
       console:
         down: This Virtual Machine is down. Please start it to access its console.
         shortKeys: Shortcut Keys
+        reconnect: Reconnect
+        starting: Virtual Machine is starting…
+        stopping: Virtual Machine is stopping…
+        startingBtn: Starting…
+        stoppingBtn: Stopping…
 
   volume:
     label: Volumes

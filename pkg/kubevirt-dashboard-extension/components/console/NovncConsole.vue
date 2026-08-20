@@ -5,6 +5,8 @@ import BrandImage from '@shell/components/BrandImage';
 export default {
   components: { BrandImage },
 
+  emits: ['connected', 'disconnected'],
+
   props: {
     url: {
       type: String,
@@ -17,35 +19,94 @@ export default {
       rfb: null,
       connected: false,
       disconnected: false,
+      connectId: 0,
     };
   },
 
   mounted() {
     this.$nextTick(() => {
-      const rfb = new RFB(this.$refs.view, this.url);
-
-      rfb.addEventListener('connect', () => {
-        this.connected = true;
-      });
-      rfb.addEventListener('disconnect', () => {
-        this.disconnected = true;
-      });
-
-      this.rfb = rfb;
+      this.connect();
     });
   },
 
+  beforeUnmount() {
+    this.teardown();
+  },
+
+  beforeDestroy() {
+    this.teardown();
+  },
+
   methods: {
+    teardown() {
+      this.connectId += 1;
+
+      if (!this.rfb) {
+        return;
+      }
+
+      try {
+        this.rfb.disconnect();
+      } catch (e) {
+        // ignore
+      }
+
+      this.rfb = null;
+    },
+
+    connect() {
+      if (!this.url || !this.$refs.view) {
+        return;
+      }
+
+      this.teardown();
+      this.$refs.view.innerHTML = '';
+      this.connected = false;
+      this.disconnected = false;
+
+      const connectId = this.connectId;
+      const rfb = new RFB(this.$refs.view, this.url);
+
+      rfb.addEventListener('connect', () => {
+        if (connectId !== this.connectId) {
+          return;
+        }
+
+        this.connected = true;
+        this.disconnected = false;
+        this.$emit('connected');
+      });
+
+      rfb.addEventListener('disconnect', () => {
+        if (connectId !== this.connectId) {
+          return;
+        }
+
+        this.disconnected = true;
+        this.$emit('disconnected');
+      });
+
+      this.rfb = rfb;
+    },
+
     disconnect() {
-      this.rfb.disconnect();
+      this.teardown();
+    },
+
+    reconnect() {
+      this.connect();
     },
 
     ctrlAltDelete() {
-      this.rfb.sendCtrlAltDel();
+      if (this.rfb) {
+        this.rfb.sendCtrlAltDel();
+      }
     },
 
     sendKey(keysym, code, down) {
-      this.rfb.sendKey(keysym, code, down);
+      if (this.rfb) {
+        this.rfb.sendKey(keysym, code, down);
+      }
     },
   },
 };

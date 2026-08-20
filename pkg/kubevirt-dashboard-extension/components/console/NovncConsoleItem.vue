@@ -52,7 +52,15 @@ export default {
 <template>
   <ul class="list-unstyled dropdown combination-keys__container">
     <li v-for="(item, key) in items" :key="key">
-      <v-dropdown v-if="!!item.keys" placement="right-start" trigger="click" :container="false">
+      <v-dropdown
+        v-if="!!item.keys"
+        placement="right-start"
+        trigger="click"
+        container="body"
+        :distance="4"
+        :prevent-overflow="false"
+        :auto-hide="false"
+      >
         <span
           :class="{ open: getOpenStatus(key, pos) }"
           class="p-10 hand"
@@ -78,12 +86,14 @@ export default {
 
 <style lang="scss" scoped>
 .combination-keys__container {
-  max-width: 60px;
+  min-width: 120px;
+  width: max-content;
 
   DIV,
   SPAN {
     display: block;
-    text-align: center;
+    text-align: left;
+    white-space: nowrap;
   }
 
   SPAN {

@@ -1,6 +1,7 @@
 <script>
 import KeyTable from '@novnc/novnc/lib/input/keysym';
-import { VM_RESOURCE_NAME } from '../../constants';
+import BrandImage from '@shell/components/BrandImage';
+import { VM_RESOURCE_NAME, VMI_RESOURCE_NAME } from '../../constants';
 import NovncConsole from './NovncConsole';
 import NovncConsoleItem from './NovncConsoleItem';
 
@@ -97,7 +98,7 @@ const F_KEYS = {
 };
 
 export default {
-  components: { NovncConsole, NovncConsoleItem },
+  components: { BrandImage, NovncConsole, NovncConsoleItem },
 
   props: {
     value: {
@@ -113,25 +114,38 @@ export default {
     return {
       keysRecord: [],
       vmResource: {},
+      shortcutMenuKey: 0,
+      shortcutOpen: false,
+      consoleKey: 0,
+      consoleConnected: false,
     };
   },
 
   async fetch() {
-    this.vmResource = await this.$store.dispatch('cluster/find', {
-      type: VM_RESOURCE_NAME,
-      id: this.value.id,
-    });
+    await this.refreshVm();
   },
 
   computed: {
+    resourceId() {
+      return this.value?.id || `${ this.$route.params.namespace }/${ this.$route.params.vm }`;
+    },
+
     isDown() {
       return this.isEmpty(this.value);
     },
 
-    url() {
-      const ip = `${window.location.hostname}:${window.location.port}`;
+    isVmiReady() {
+      return this.value?.status?.phase === 'Running';
+    },
 
-      return `wss://${ip}${this.value?.getVMIApiPath}`;
+    url() {
+      if (this.isDown || !this.isVmiReady || !this.value?.getVMIApiPath) {
+        return '';
+      }
+
+      const ip = `${ window.location.hostname }:${ window.location.port }`;
+
+      return `wss://${ ip }${ this.value.getVMIApiPath }`;
     },
 
     allKeys() {
@@ -165,19 +179,184 @@ export default {
     hasSoftRebootAction() {
       return this.vmResource?.canSoftReboot;
     },
+
+    isStarting() {
+      // Harvester isStarting can stay truthy after Running — exclude when already running
+      return !!this.vmResource?.isStarting && !this.vmResource?.isRunning;
+    },
+
+    isStopping() {
+      return (!!this.vmResource?.isStopping || !!this.vmResource?.isBeingStopped) &&
+        !this.vmResource?.isRunning;
+    },
+
+    // Single power control: Start → Starting… → Stop → Stopping… → Start
+    powerButton() {
+      if (this.vmResource?.canStop || this.vmResource?.isRunning) {
+        return {
+          label:     this.t('kubevirt.action.stop'),
+          className: 'bg-error',
+          disabled:  false,
+          action:    'stop',
+        };
+      }
+
+      if (this.isStopping) {
+        return {
+          label:     this.t('kubevirt.virtualMachine.detail.console.stoppingBtn'),
+          className: 'bg-error',
+          disabled:  true,
+          action:    null,
+        };
+      }
+
+      if (this.isStarting) {
+        return {
+          label:     this.t('kubevirt.virtualMachine.detail.console.startingBtn'),
+          className: 'bg-primary',
+          disabled:  true,
+          action:    null,
+        };
+      }
+
+      return {
+        label:     this.t('kubevirt.action.start'),
+        className: 'bg-primary',
+        disabled:  !this.vmResource?.canStart,
+        action:    'start',
+      };
+    },
+  },
+
+  watch: {
+    // VMI Running after Start — remount console to auto-connect
+    isVmiReady(ready, wasReady) {
+      if (ready && !wasReady) {
+        this.consoleConnected = false;
+        this.consoleKey += 1;
+      } else if (!ready) {
+        this.consoleConnected = false;
+      }
+    },
+
+    isDown(down, wasDown) {
+      if (!wasDown && down) {
+        this.closeShortcutMenus();
+      }
+    },
+
+    resourceId: {
+      immediate: false,
+      handler() {
+        this.refreshVm();
+      },
+    },
   },
 
   methods: {
     isEmpty(o) {
-      return o !== undefined && Object.keys(o).length === 0;
+      if (o === undefined || o === null) {
+        return true;
+      }
+
+      return Object.keys(o).length === 0;
+    },
+
+    async refreshVm() {
+      const id = this.resourceId;
+
+      if (!id || id.includes('undefined')) {
+        return;
+      }
+
+      try {
+        this.vmResource = await this.$store.dispatch('cluster/find', {
+          type: VM_RESOURCE_NAME,
+          id,
+          opt:  { force: true, watch: true },
+        });
+      } catch (e) {
+        // ignore
+      }
+    },
+
+    async refreshVmi() {
+      const id = this.resourceId;
+
+      if (!id || id.includes('undefined')) {
+        return;
+      }
+
+      try {
+        await this.$store.dispatch('cluster/find', {
+          type: VMI_RESOURCE_NAME,
+          id,
+          opt:  { force: true, watch: true },
+        });
+      } catch (e) {
+        // VMI may not exist while stopped
+      }
     },
 
     close() {
-      this.$refs.novncConsole.disconnect();
+      this.$refs.novncConsole?.disconnect();
+    },
+
+    async reconnect() {
+      await Promise.all([this.refreshVm(), this.refreshVmi()]);
+      await this.$nextTick();
+
+      // Remount NovncConsole — most reliable reconnect (avoids stale RFB disconnect races)
+      if (this.isVmiReady) {
+        this.consoleConnected = false;
+        this.consoleKey += 1;
+      }
     },
 
     update({ key, pos }) {
       this.keysRecord.splice(pos, this.keysRecord.length - pos, key);
+    },
+
+    onShortcutShown(shown) {
+      this.shortcutOpen = shown;
+
+      if (!shown) {
+        this.keysRecord = [];
+        this.shortcutMenuKey += 1;
+      }
+    },
+
+    closeShortcutMenus() {
+      const popover = this.$refs.popover;
+
+      if (typeof popover?.hide === 'function') {
+        popover.hide();
+      } else if (popover) {
+        popover.isOpen = false;
+      }
+
+      this.shortcutOpen = false;
+      this.keysRecord = [];
+      this.shortcutMenuKey += 1;
+    },
+
+    onShortcutOutsideClick(e) {
+      if (!this.shortcutOpen) {
+        return;
+      }
+
+      const target = e.target;
+
+      // Keep open when interacting with shortcut menus or the trigger button
+      if (target?.closest?.('.v-popper__popper') || target?.closest?.('.combination-keys__container')) {
+        return;
+      }
+
+      if (this.$refs.popover?.$el?.contains?.(target)) {
+        return;
+      }
+
+      this.closeShortcutMenus();
     },
 
     // Send function key, e.g. ALT + F
@@ -190,13 +369,37 @@ export default {
         this.$refs.novncConsole.sendKey(this.allKeys[key].value, key, false);
       });
 
-      this.$refs.popover.isOpen = false;
-      this.keysRecord = [];
+      this.closeShortcutMenus();
+    },
+
+    sendCtrlAltDel() {
+      this.$refs.novncConsole?.ctrlAltDelete();
     },
 
     softReboot() {
       this.vmResource.softrebootVM();
     },
+
+    onPowerClick() {
+      if (this.powerButton.action === 'start') {
+        this.vmResource?.startVM?.();
+        this.refreshVmi();
+      } else if (this.powerButton.action === 'stop') {
+        this.vmResource?.stopVM?.();
+      }
+    },
+  },
+
+  mounted() {
+    document.addEventListener('mousedown', this.onShortcutOutsideClick, true);
+  },
+
+  beforeUnmount() {
+    document.removeEventListener('mousedown', this.onShortcutOutsideClick, true);
+  },
+
+  beforeDestroy() {
+    document.removeEventListener('mousedown', this.onShortcutOutsideClick, true);
   },
 };
 </script>
@@ -205,36 +408,77 @@ export default {
   <div id="app">
     <div class="vm-console">
       <div class="combination-keys">
-        <VDropdown
-          ref="popover"
-          placement="top"
-          trigger="click"
-          :container="false"
-          @auto-hide="keysRecord = []"
-        >
-          <button class="btn btn-sm bg-primary">
-            {{ t('kubevirt.virtualMachine.detail.console.shortKeys') }}
+        <template v-if="consoleConnected">
+          <VDropdown
+            ref="popover"
+            placement="top"
+            trigger="click"
+            :container="false"
+            :auto-hide="false"
+            @show="shortcutOpen = true"
+            @hide="onShortcutShown(false)"
+            @update:shown="onShortcutShown"
+          >
+            <button class="btn btn-sm bg-primary">
+              {{ t('kubevirt.virtualMachine.detail.console.shortKeys') }}
+            </button>
+
+            <template #popper>
+              <novnc-console-item
+                :key="shortcutMenuKey"
+                :items="keymap"
+                :path="keysRecord"
+                :pos="0"
+                @update="update"
+                @sendKeys="sendKeys"
+              />
+            </template>
+          </VDropdown>
+
+          <button class="btn btn-sm bg-primary" @click="sendCtrlAltDel">
+            {{ t('kubevirt.virtualMachine.console.sendCtrlAltDel', {}, true) || 'Send Ctrl+Alt+Del' }}
           </button>
 
-          <template #popper>
-            <novnc-console-item
-              :items="keymap"
-              :path="keysRecord"
-              :pos="0"
-              @update="update"
-              @sendKeys="sendKeys"
-            />
-          </template>
-        </VDropdown>
+          <button v-if="hasSoftRebootAction" class="btn btn-sm bg-primary" @click="softReboot">
+            {{ t('kubevirt.action.softreboot') }}
+          </button>
+        </template>
 
-        <button v-if="hasSoftRebootAction" class="btn btn-sm bg-primary" @click="softReboot">
-          {{ t('kubevirt.action.softreboot') }}
+        <button class="btn btn-sm bg-primary" @click="reconnect">
+          {{ t('kubevirt.virtualMachine.detail.console.reconnect') }}
+        </button>
+
+        <button
+          class="btn btn-sm"
+          :class="powerButton.className"
+          :disabled="powerButton.disabled"
+          @click="onPowerClick"
+        >
+          {{ powerButton.label }}
         </button>
       </div>
-      <NovncConsole v-if="url && !isDown" ref="novncConsole" :url="url" />
-      <p v-if="isDown">
-        {{ t('kubevirt.virtualMachine.detail.console.down') }}
-      </p>
+
+      <NovncConsole
+        v-if="url && isVmiReady"
+        :key="consoleKey"
+        ref="novncConsole"
+        :url="url"
+        @connected="consoleConnected = true"
+        @disconnected="consoleConnected = false"
+      />
+      <div v-else class="console-disconnected">
+        <main class="main-layout error">
+          <div class="text-center">
+            <BrandImage file-name="error-desert-landscape.svg" width="900" height="300" />
+            <h1>
+              {{ t('generic.notification.title.warning') }}
+            </h1>
+            <h2 class="text-secondary mt-20">
+              {{ t('vncConsole.error.message') }}
+            </h2>
+          </div>
+        </main>
+      </div>
     </div>
   </div>
 </template>
@@ -248,5 +492,19 @@ export default {
 
 .combination-keys {
   background: rgb(40, 40, 40);
+
+  :deep(.v-popper__inner) {
+    overflow: visible;
+  }
+}
+
+.console-disconnected {
+  .error {
+    overflow: hidden;
+
+    h1 {
+      font-size: 5rem;
+    }
+  }
 }
 </style>

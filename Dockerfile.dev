@@ -1,0 +1,16 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache git python3 make g++
+
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile
+
+COPY . .
+
+EXPOSE 8005
+
+# Le volume ./pkg est monté au runtime, ce qui écrase le contenu copié ici.
+# webpack démarre avec le contenu du volume, incluant les nouveaux dossiers (detail/, etc.)
+CMD ["yarn", "dev"]

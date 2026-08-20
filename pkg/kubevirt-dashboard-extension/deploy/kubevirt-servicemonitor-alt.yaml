@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kubevirt-metrics-alt
+  namespace: cattle-monitoring-system
+  labels:
+    release: rancher-monitoring
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      prometheus.kubevirt.io: ""
+  endpoints:
+    - port: metrics
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      honorLabels: true

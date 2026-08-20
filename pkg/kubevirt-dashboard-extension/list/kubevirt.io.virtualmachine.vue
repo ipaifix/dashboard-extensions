@@ -7,7 +7,7 @@ import { allHash } from '@shell/utils/promise';
 import Loading from '@shell/components/Loading';
 import { POD, NODE } from '@shell/config/types';
 import ConsoleBar from '../components/VMConsoleBar';
-import { VMI_RESOURCE_NAME, VM_RESOURCE_NAME } from '../constants';
+import { VMI_RESOURCE_NAME, VM_RESOURCE_NAME, VM_RESTORE_RESOURCE_NAME } from '../constants';
 
 export default {
   name: 'VirtualMachineList',
@@ -34,7 +34,7 @@ export default {
   },
 
   async fetch() {
-    const resourcesToFetch = [VM_RESOURCE_NAME, VMI_RESOURCE_NAME, NODE, POD];
+    const resourcesToFetch = [VM_RESOURCE_NAME, VMI_RESOURCE_NAME, VM_RESTORE_RESOURCE_NAME, NODE, POD];
     const promiseMap = resourcesToFetch.reduce((res, resourceType) => {
       if (this.$store.getters['cluster/schemaFor'](resourceType)) {
         res[resourceType] = this.$store.dispatch('cluster/findAll', {
@@ -50,6 +50,15 @@ export default {
   },
 
   computed: {
+    // Keep list state badges reactive when VirtualMachineRestore objects change
+    allRestores() {
+      try {
+        return this.$store.getters['cluster/all'](VM_RESTORE_RESOURCE_NAME) || [];
+      } catch (e) {
+        return [];
+      }
+    },
+
     headers() {
       return [
         STATE,
@@ -111,6 +120,9 @@ export default {
     },
 
     rows() {
+      // Depend on restores so "Restoring" refreshes without waiting for a VM patch
+      void this.allRestores.length;
+
       const matchVMIs = this.allVMIs.filter((VMI) => !this.allVMs.find((VM) => VM.id === VMI.id));
       return [...this.allVMs, ...matchVMIs];
     },
