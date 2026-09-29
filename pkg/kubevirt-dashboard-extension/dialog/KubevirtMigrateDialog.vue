@@ -1,5 +1,6 @@
 <script>
 import { NODE } from '@shell/config/types';
+import { NODE_SCHEDULABLE_LABEL } from '../constants';
 
 export default {
   name: 'KubevirtMigrateDialog',
@@ -45,6 +46,8 @@ export default {
     schedulableNodes() {
       return (this.nodes || []).filter((n) => {
         if (n.spec?.unschedulable) return false;
+        if (n.metadata?.labels?.[NODE_SCHEDULABLE_LABEL] !== 'true') return false;
+
         const ready = (n.status?.conditions || []).find((c) => c.type === 'Ready');
 
         if (!ready || ready.status !== 'True') return false;

@@ -1,4 +1,6 @@
 <script>
+import { NODE_SCHEDULABLE_LABEL } from '../constants';
+
 export default {
   name: 'MigrateVMDialog',
 
@@ -29,7 +31,15 @@ export default {
     },
 
     eligibleNodes() {
-      return this.nodes.filter((n) => n.metadata?.name !== this.currentNode);
+      return this.nodes.filter((n) => {
+        if (n.metadata?.name === this.currentNode) return false;
+        if (n.spec?.unschedulable) return false;
+        if (n.metadata?.labels?.[NODE_SCHEDULABLE_LABEL] !== 'true') return false;
+
+        const ready = (n.status?.conditions || []).find((c) => c.type === 'Ready');
+
+        return ready?.status === 'True';
+      });
     },
 
     namespace() {
