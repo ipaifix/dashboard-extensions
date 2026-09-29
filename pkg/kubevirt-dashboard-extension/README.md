@@ -2,7 +2,7 @@
 
 An Edge focused extension for Rancher Dashboard allowing to monitor and interact virtual machine based workloads.
 
-**Current freeze:** `1.4.0-rc.1` — see [ROADMAP.md](./ROADMAP.md) for shipped features, remaining priorities (P3 edit/disks/NAD … P5 create), and the production release checklist.
+**Current freeze:** `1.4.0-rc.2` — see [ROADMAP.md](./ROADMAP.md) for shipped features, remaining priorities (P3 edit/disks/NAD … P5 create), and the production release checklist.
 
 For more information on SUSE Edge see https://suse-edge.github.io/ \
 For more information on Kubevirt see https://kubevirt.io/
