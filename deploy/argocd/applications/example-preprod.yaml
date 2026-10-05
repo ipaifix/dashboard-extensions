@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubevirt-dashboard-preprod
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: kubevirt-dashboard
+    stime.io/env: preprod
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@nova-gitssh.mousquetaires.com:applications/qe/kubevirt-dashboard.git
+    targetRevision: main
+    path: deploy/argocd/overlays/preprod
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+  ignoreDifferences:
+    - group: catalog.cattle.io
+      kind: UIPlugin
+      jsonPointers:
+        - /status

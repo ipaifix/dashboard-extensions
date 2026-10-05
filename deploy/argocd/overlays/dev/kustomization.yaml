@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: nova-harbor.mousquetaires.com/qe/kubevirt-ui-plugin-catalog
+    newTag: dev
+
+patches:
+  - target:
+      group: catalog.cattle.io
+      version: v1
+      kind: UIPlugin
+      name: kubevirt-dashboard-extension
+    patch: |-
+      - op: replace
+        path: /spec/plugin/version
+        value: "1.4.0-rc.2"
+      - op: replace
+        path: /spec/plugin/endpoint
+        value: http://kubevirt-ui-plugin-catalog.cattle-ui-plugin-system.svc/extensions/kubevirt-dashboard-extension/1.4.0-rc.2
+      - op: replace
+        path: /spec/plugin/compressedEndpoint
+        value: http://kubevirt-ui-plugin-catalog.cattle-ui-plugin-system.svc/extensions/kubevirt-dashboard-extension/1.4.0-rc.2.tgz
+  - target:
+      group: catalog.cattle.io
+      version: v1
+      kind: UIPlugin
+      name: akri-dashboard-extension
+    patch: |-
+      - op: replace
+        path: /spec/plugin/version
+        value: "1.3.2"
+      - op: replace
+        path: /spec/plugin/endpoint
+        value: http://kubevirt-ui-plugin-catalog.cattle-ui-plugin-system.svc/extensions/akri-dashboard-extension/1.3.2
+      - op: replace
+        path: /spec/plugin/compressedEndpoint
+        value: http://kubevirt-ui-plugin-catalog.cattle-ui-plugin-system.svc/extensions/akri-dashboard-extension/1.3.2.tgz

@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - catalog-deployment.yaml
+  - catalog-service.yaml
+  - uiplugin-kubevirt.yaml
+  - uiplugin-akri.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: argocd-example
+    includeSelectors: false

@@ -28,6 +28,8 @@ Then register that image as an Extensions catalog in Rancher.
 GitLab CI (Kaniko) does the same on `develop` / `preprod` / `main` / tags —
 guide: [`docs/gitlab-ci-catalog.md`](docs/gitlab-ci-catalog.md).
 
+Argo CD examples (catalogue in-cluster + UIPlugins): [`deploy/argocd/`](deploy/argocd/).
+
 Versions vs backends: [`COMPATIBILITY.md`](COMPATIBILITY.md).
 
 The generated `.github/workflows` (GitHub Pages / GHCR) come from the SUSE Edge
