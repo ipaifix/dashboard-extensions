@@ -1,0 +1,201 @@
+# CI kubevirt-dashboard — test + catalogue Harbor (Kaniko)
+#
+# Aligné sur ztp-dashboard / ztp-operator : runners K8s partagés bloquent
+# Buildah (uid_map: operation not permitted).
+#
+# Flux : test → publish Helm/plugin (Node) → image catalogue (Kaniko).
+# Catalogue multi-chart : kubevirt-dashboard-extension + akri-dashboard-extension.
+#
+# Guide : docs/gitlab-ci-catalog.md
+# Compatibilité : COMPATIBILITY.md
+#
+# Secrets (masked) : HARBOR_USER, HARBOR_PASSWORD
+# Surchargeables : HARBOR_HOST, REGISTRY
+
+stages:
+  - test
+  - publish
+  - build
+
+variables:
+  HARBOR_HOST: nova-harbor.mousquetaires.com
+  REGISTRY: nova-harbor.mousquetaires.com/qe
+  PKG: kubevirt-dashboard-extension
+  PKGS: kubevirt-dashboard-extension akri-dashboard-extension
+  CATALOG_IMAGE: kubevirt-ui-plugin-catalog
+  KANIKO_IMAGE: gcr.io/kaniko-project/executor:v1.23.2-debug
+  KUBERNETES_CPU_REQUEST: "500m"
+  KUBERNETES_CPU_LIMIT: "2"
+  KUBERNETES_MEMORY_REQUEST: "1Gi"
+  KUBERNETES_MEMORY_LIMIT: "8Gi"
+
+.dash_changes: &dash_changes
+  changes:
+    - pkg/**/*
+    - package.json
+    - yarn.lock
+    - Makefile
+    - Dockerfile.publish
+    - Dockerfile.catalog
+    - scripts/**/*
+    - .gitlab-ci.yml
+    - COMPATIBILITY.md
+
+.test_rules: &test_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    <<: *dash_changes
+  - if: $CI_COMMIT_BRANCH
+    <<: *dash_changes
+  - if: $CI_COMMIT_TAG
+
+.publish_rules: &publish_rules
+  - if: $CI_COMMIT_TAG =~ /^v?[0-9]+\./
+  - if: $CI_COMMIT_TAG =~ /kubevirt-dashboard-extension-[0-9]/
+  - if: $CI_COMMIT_BRANCH == "develop"
+    <<: *dash_changes
+  - if: $CI_COMMIT_BRANCH == "preprod"
+    <<: *dash_changes
+  - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    <<: *dash_changes
+
+test:ext:
+  stage: test
+  image: node:20-bookworm
+  script:
+    - corepack enable && corepack prepare yarn@1.22.22 --activate
+    - yarn install --frozen-lockfile
+    - node --test pkg/kubevirt-dashboard-extension/utils/vm-actions.test.js
+  rules: *test_rules
+
+# Artefacts Helm/plugin (mêmes outils que Dockerfile.publish : helm, yq, md5)
+publish:pkgs:
+  stage: publish
+  image: node:20-bookworm
+  needs: ["test:ext"]
+  before_script:
+    - |
+      set -eu
+      apt-get update -qq
+      apt-get install -y --no-install-recommends ca-certificates curl git jq wget
+      ARCH="$(dpkg --print-architecture)"
+      case "$ARCH" in
+        amd64) YQ_ARCH=amd64; HELM_ARCH=amd64 ;;
+        arm64) YQ_ARCH=arm64; HELM_ARCH=arm64 ;;
+        *) echo "unsupported arch $ARCH"; exit 1 ;;
+      esac
+      curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_${YQ_ARCH}" \
+        -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+      curl -fsSL "https://get.helm.sh/helm-v3.16.2-linux-${HELM_ARCH}.tar.gz" | tar -xz
+      mv "linux-${HELM_ARCH}/helm" /usr/local/bin/helm
+      rm -rf "linux-${HELM_ARCH}"
+      printf '#!/bin/sh\nmd5sum "$@" | awk "{print \$1}"\n' > /usr/local/bin/md5-q
+      printf '#!/bin/sh\nif [ "$1" = "-q" ]; then shift; md5-q "$@"; else md5sum "$@"; fi\n' > /usr/local/bin/md5
+      chmod +x /usr/local/bin/md5 /usr/local/bin/md5-q
+      corepack enable && corepack prepare yarn@1.22.22 --activate
+  script:
+    - |
+      set -euo pipefail
+      yarn install --frozen-lockfile
+      # shellcheck disable=SC2086
+      yarn publish-pkgs -f ${PKGS}
+      test -d "charts/${PKG}"
+      test -d "extensions/${PKG}"
+      test -d assets
+  artifacts:
+    paths:
+      - charts/
+      - extensions/
+      - assets/
+    expire_in: 1 hour
+    when: on_success
+  rules: *publish_rules
+
+# Image catalogue busybox httpd → Harbor (un tag = un snapshot catalogue)
+build:catalog:
+  stage: build
+  image:
+    name: $KANIKO_IMAGE
+    entrypoint: [""]
+  needs: ["publish:pkgs"]
+  before_script:
+    - |
+      set -eu
+      if [ -z "${HARBOR_USER:-}" ] || [ -z "${HARBOR_PASSWORD:-}" ]; then
+        echo "HARBOR_USER / HARBOR_PASSWORD requis (variables CI/CD masked)." >&2
+        exit 1
+      fi
+      mkdir -p /kaniko/.docker
+      AUTH="$(printf '%s:%s' "${HARBOR_USER}" "${HARBOR_PASSWORD}" | base64 | tr -d '\n')"
+      cat > /kaniko/.docker/config.json <<EOF
+      {
+        "auths": {
+          "${HARBOR_HOST}": {
+            "auth": "${AUTH}"
+          }
+        }
+      }
+      EOF
+  script:
+    - |
+      set -eu
+
+      PKG_VER="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "pkg/${PKG}/package.json" | head -1)"
+      if [ -z "${PKG_VER}" ]; then
+        echo "Cannot read version from pkg/${PKG}/package.json" >&2
+        exit 1
+      fi
+
+      EXTRA_TAGS_STR=""
+      if [ -n "${CI_COMMIT_TAG:-}" ]; then
+        TAG_VER="${CI_COMMIT_TAG#v}"
+        TAG_VER="${TAG_VER#kubevirt-dashboard-extension-}"
+        if [ "${TAG_VER}" != "${PKG_VER}" ]; then
+          echo "WARNING: git tag ${CI_COMMIT_TAG} ≠ package.json ${PKG_VER} — catalogue tagué ${PKG_VER}"
+        fi
+        EXTRA_TAGS_STR="latest v${PKG_VER}"
+      else
+        case "${CI_COMMIT_BRANCH}" in
+          develop) EXTRA_TAGS_STR="dev" ;;
+          preprod) EXTRA_TAGS_STR="preprod" ;;
+          main|"${CI_DEFAULT_BRANCH}") EXTRA_TAGS_STR="latest" ;;
+        esac
+      fi
+
+      IMG="${REGISTRY}/${CATALOG_IMAGE}"
+      echo "Catalog VERSION=${PKG_VER} EXTRA_TAGS=${EXTRA_TAGS_STR:-(none)} → ${IMG}"
+
+      STAGE="${CI_PROJECT_DIR}/.ci-catalog-context"
+      rm -rf "${STAGE}"
+      mkdir -p "${STAGE}"
+
+      INDEX_SRC="${CI_PROJECT_DIR}/assets/index.yaml"
+      if [ ! -f "${INDEX_SRC}" ]; then
+        INDEX_SRC="${CI_PROJECT_DIR}/index.yaml"
+      fi
+      if [ ! -f "${INDEX_SRC}" ]; then
+        echo "Missing index.yaml after publish:pkgs" >&2
+        exit 1
+      fi
+
+      cp "${INDEX_SRC}" "${STAGE}/index.yaml"
+      cp -R "${CI_PROJECT_DIR}/assets" "${STAGE}/assets"
+      cp -R "${CI_PROJECT_DIR}/charts" "${STAGE}/charts"
+      cp -R "${CI_PROJECT_DIR}/extensions" "${STAGE}/extensions"
+      cp "${CI_PROJECT_DIR}/Dockerfile.catalog" "${STAGE}/Dockerfile.catalog"
+
+      set -- \
+        /kaniko/executor \
+        --context "${STAGE}" \
+        --dockerfile "${STAGE}/Dockerfile.catalog" \
+        --destination "${IMG}:${PKG_VER}" \
+        --snapshot-mode=redo \
+        --use-new-run \
+        --cleanup
+
+      for alias in ${EXTRA_TAGS_STR}; do
+        [ -n "${alias}" ] || continue
+        set -- "$@" --destination "${IMG}:${alias}"
+      done
+
+      "$@"
+  rules: *publish_rules
